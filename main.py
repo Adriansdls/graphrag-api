@@ -1,37 +1,30 @@
 import os
-import pandas as pd
-import tiktoken
+from pathlib import Path
 from fastapi import FastAPI
 from pydantic import BaseModel
-from dotenv import load_dotenv
 
-from graphrag.query.context_builder.entity_extraction import EntityVectorStoreKey
+import pandas as pd
+import tiktoken
+
 from graphrag.query.indexer_adapters import (
-    read_indexer_covariates,
     read_indexer_entities,
     read_indexer_relationships,
     read_indexer_reports,
     read_indexer_text_units,
 )
-from graphrag.query.input.loaders.dfs import store_entity_semantic_embeddings
+from graphrag.query.input.loaders.dfs import (
+    store_entity_semantic_embeddings,
+)
 from graphrag.query.llm.oai.chat_openai import ChatOpenAI
 from graphrag.query.llm.oai.embedding import OpenAIEmbedding
 from graphrag.query.llm.oai.typing import OpenaiApiType
-from search import LocalSearchModified
-from graphrag.query.structured_search.local_search.mixed_context import LocalSearchMixedContext
-from graphrag.query.structured_search.local_search.search import LocalSearch
+from graphrag.query.structured_search.drift_search.drift_context import (
+    DRIFTSearchContextBuilder,
+)
+from graphrag.query.structured_search.drift_search.search import DRIFTSearch
 from graphrag.vector_stores.lancedb import LanceDBVectorStore
 
-# Load environment variables
-load_dotenv()
-
-# Set configuration from environment variables
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  
-OPENAI_EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-large")
-OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
-
-
-# Adjust INPUT_DIR if needed. Ensure these files are present in the deployed code.
+# Directory for parquet files and embeddings
 INPUT_DIR = "./parquets"
 LANCEDB_URI = f"{INPUT_DIR}/lancedb"
 
@@ -41,27 +34,20 @@ ENTITY_EMBEDDING_TABLE = "create_final_entities"
 RELATIONSHIP_TABLE = "create_final_relationships"
 COVARIATE_TABLE = "create_final_covariates"
 TEXT_UNIT_TABLE = "create_final_text_units"
-COMMUNITY_LEVEL = 3
+COMMUNITY_LEVEL = 2
 
 # Load DataFrames
 entity_df = pd.read_parquet(f"{INPUT_DIR}/{ENTITY_TABLE}.parquet")
 entity_embedding_df = pd.read_parquet(f"{INPUT_DIR}/{ENTITY_EMBEDDING_TABLE}.parquet")
 relationship_df = pd.read_parquet(f"{INPUT_DIR}/{RELATIONSHIP_TABLE}.parquet")
-covariate_df = pd.read_parquet(f"{INPUT_DIR}/{COVARIATE_TABLE}.parquet")
-report_df = pd.read_parquet(f"{INPUT_DIR}/{COMMUNITY_REPORT_TABLE}.parquet")
 text_unit_df = pd.read_parquet(f"{INPUT_DIR}/{TEXT_UNIT_TABLE}.parquet")
 
 entities = read_indexer_entities(entity_df, entity_embedding_df, COMMUNITY_LEVEL)
 relationships = read_indexer_relationships(relationship_df)
-claims = read_indexer_covariates(covariate_df)
-covariates = {"claims": claims}
-reports = read_indexer_reports(report_df, entity_df, COMMUNITY_LEVEL)
 text_units = read_indexer_text_units(text_unit_df)
 
-# Set up vectorstore
-description_embedding_store = LanceDBVectorStore(
-    collection_name="entity_description_embeddings",
-)
+# Vector store
+description_embedding_store = LanceDBVectorStore(collection_name="default-entity-description")
 description_embedding_store.connect(db_uri=LANCEDB_URI)
 
 store_entity_semantic_embeddings(
@@ -69,10 +55,10 @@ store_entity_semantic_embeddings(
     vectorstore=description_embedding_store
 )
 
-# Set up LLM and embedding
-llm = ChatOpenAI(
-    api_key=OPENAI_API_KEY,
-    model=OPENAI_CHAT_MODEL,
+# LLM and embeddings
+chat_llm = ChatOpenAI(
+    api_key=os.environ["OPENAI_API_KEY"],
+    model="gpt-4o-mini",
     api_type=OpenaiApiType.OpenAI,
     max_retries=20,
 )
@@ -80,52 +66,56 @@ llm = ChatOpenAI(
 token_encoder = tiktoken.get_encoding("cl100k_base")
 
 text_embedder = OpenAIEmbedding(
-    api_key=OPENAI_API_KEY,
-    model=OPENAI_EMBED_MODEL,
+    api_key=os.environ["OPENAI_API_KEY"],
+    api_base=None,
     api_type=OpenaiApiType.OpenAI,
+    model="text-embedding-3-large",
     max_retries=20,
 )
 
-context_builder = LocalSearchMixedContext(
-    community_reports=reports,
-    text_units=text_units,
-    entities=entities,
-    relationships=relationships,
-    covariates=covariates,
-    entity_text_embeddings=description_embedding_store,
-    embedding_vectorstore_key=EntityVectorStoreKey.ID,
-    text_embedder=text_embedder,
-    token_encoder=token_encoder
+def embed_community_reports(
+    input_dir: str,
+    embedder: OpenAIEmbedding,
+    community_report_table: str = COMMUNITY_REPORT_TABLE,
+):
+    """Embeds the full content of the community reports if not already embedded."""
+    input_path = Path(input_dir) / f"{community_report_table}.parquet"
+    output_path = Path(input_dir) / f"{community_report_table}_with_embeddings.parquet"
+
+    if output_path.exists():
+        return pd.read_parquet(output_path)
+
+    print("Embedding file not found. Computing community report embeddings...")
+    report_df = pd.read_parquet(input_path)
+    if "full_content" not in report_df.columns:
+        raise ValueError(f"'full_content' column not found in {input_path}")
+
+    report_df["full_content_embeddings"] = report_df["full_content"].apply(embedder.embed)
+    report_df.to_parquet(output_path)
+    print(f"Embeddings saved to {output_path}")
+    return report_df
+
+report_df = embed_community_reports(INPUT_DIR, text_embedder)
+
+reports = read_indexer_reports(
+    report_df,
+    entity_df,
+    COMMUNITY_LEVEL,
+    content_embedding_col="full_content_embeddings",
 )
 
-local_context_params = {
-    "text_unit_prop": 0.5,
-    "community_prop": 0.1,
-    "conversation_history_max_turns": 0,
-    "conversation_history_user_turns_only": True,
-    "top_k_mapped_entities": 5,
-    "top_k_relationships": 5,
-    "include_entity_rank": True,
-    "include_relationship_weight": True,
-    "include_community_rank": False,
-    "return_candidate_context": True,
-    "embedding_vectorstore_key": EntityVectorStoreKey.ID,
-    "max_tokens": 12000
-}
-
-llm_params = {
-    "max_tokens": 2000,
-    "temperature": 0.0,
-}
-
-active_local_search = LocalSearchModified(
-    llm=llm,
-    context_builder=context_builder,
-    token_encoder=token_encoder,
-    llm_params=llm_params,
-    context_builder_params=local_context_params,
-    response_type="educational content that is engaging and interesting for the reader",
-    system_prompt="Use only the following content to answer the question"
+# Build context and search objects
+context_builder = DRIFTSearchContextBuilder(
+    chat_llm=chat_llm,
+    text_embedder=text_embedder,
+    entities=entities,
+    relationships=relationships,
+    reports=reports,
+    entity_text_embeddings=description_embedding_store,
+    text_units=text_units,
+)
+search = DRIFTSearch(
+    llm=chat_llm, context_builder=context_builder, token_encoder=token_encoder
 )
 
 app = FastAPI()
@@ -134,7 +124,15 @@ class QueryModel(BaseModel):
     query: str
 
 @app.post("/retrieve")
-def retrieve(payload: QueryModel):
+async def retrieve(payload: QueryModel):
     user_query = payload.query
-    results = active_local_search.get_data(user_query)
-    return {"response": results.response}
+    # Run the async search
+    resp = await search.asearch(user_query)
+    
+    # Extract the answer from the response
+    if resp.response["nodes"]:
+        answer = resp.response["nodes"][0].get("answer", "No answer found.")
+    else:
+        answer = "No answer found."
+    
+    return {"response": answer}
