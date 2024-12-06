@@ -23,6 +23,8 @@ from graphrag.query.structured_search.drift_search.drift_context import (
 )
 from graphrag.query.structured_search.drift_search.search import DRIFTSearch
 from graphrag.vector_stores.lancedb import LanceDBVectorStore
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
 
 # Directory for parquet files and embeddings
 INPUT_DIR = "./parquets"
