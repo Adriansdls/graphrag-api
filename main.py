@@ -140,9 +140,19 @@ async def retrieve(payload: QueryModel):
     
     return {"response": answer}
 
+@app.get("/retrieve")
+async def retrieve_get(query: str):
+    resp = await search.asearch(query)
+    answer = resp.response["nodes"][0].get("answer", "No answer found.") if resp.response["nodes"] else "No answer found."
+    return {"response": answer}
 
 @app.post("/local")
 def retrieve(payload: QueryModel):
     user_query = payload.query
-    results = active_local_search.get_data(user_query)
+    results = active_local_search.search(user_query)
+    return {"response": results.response}
+
+@app.get("/local_get")
+def retrieve(query: str):
+    results = active_local_search.search(query)
     return {"response": results.response}
