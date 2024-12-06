@@ -133,7 +133,13 @@ app = FastAPI()
 class QueryModel(BaseModel):
     query: str
 
-@app.post("/retrieve")
+@app.post("/drift")
+def retrieve(payload: QueryModel):
+    user_query = payload.query
+    results = active_local_search.get_data(user_query)
+    return {"response": results.response}
+
+@app.post("/local")
 def retrieve(payload: QueryModel):
     user_query = payload.query
     results = active_local_search.get_data(user_query)
