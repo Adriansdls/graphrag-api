@@ -154,6 +154,7 @@ def retrieve(payload: QueryModel):
     return {"response": results.response}
 
 @app.get("/local_get")
-def retrieve(query: str):
-    results = active_local_search.search(query)
-    return {"response": results.response}
+def retrieve(payload: QueryModel):
+    user_query = payload.query
+    results = active_local_search.search(user_query)
+    return {"response": results.context_text}
