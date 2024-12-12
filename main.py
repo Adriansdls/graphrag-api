@@ -23,6 +23,7 @@ from graphrag.query.structured_search.drift_search.drift_context import (
     DRIFTSearchContextBuilder,
 )
 from graphrag.query.structured_search.drift_search.search import DRIFTSearch
+from localSearchModified import LocalSearchModified
 from lanceModified import LanceDBVectorStore
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
