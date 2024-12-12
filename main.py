@@ -127,7 +127,7 @@ app = FastAPI()
 class QueryModel(BaseModel):
     query: str
 
-@app.post("/drift")
+@app.post("/post_drift")
 async def retrieve(payload: QueryModel):
     user_query = payload.query
     # Run the async search
@@ -141,25 +141,25 @@ async def retrieve(payload: QueryModel):
     
     return {"response": answer}
 
-@app.get("/retrieve")
+@app.get("/get_drift")
 async def retrieve_get(query: str):
     resp = await search.asearch(query)
     answer = resp.response["nodes"][0].get("answer", "No answer found.") if resp.response["nodes"] else "No answer found."
     return {"response": answer}
 
-@app.post("/local")
+@app.post("/post_local")
 def retrieve(payload: QueryModel):
     user_query = payload.query
     results = active_local_search.search(user_query)
     return {"response": results.response}
 
-@app.post("/get_data")
-def retrieve(payload: QueryModel):
-    user_query = payload.query
-    results = active_local_search.search(user_query)
-    return {"response": results.context_text}
-
-@app.get("/local_get")
+@app.get("/get_local")
 def retrieve(query: str):
     results = active_local_search.search(query)
     return {"response": results.context_text}
+
+@app.post("/post_results")
+def retrieve(payload: QueryModel):
+    user_query = payload.query
+    results = active_local_search.search(user_query)
+    return {"response": results}
