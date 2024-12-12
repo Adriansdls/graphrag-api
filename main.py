@@ -1,5 +1,5 @@
 import os
-from local import active_local_search
+from local import local_search, local_search_modified
 from pathlib import Path
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -150,16 +150,16 @@ async def retrieve_get(query: str):
 @app.post("/post_local")
 def retrieve(payload: QueryModel):
     user_query = payload.query
-    results = active_local_search.search(user_query)
+    results = local_search.search(user_query)
     return {"response": results.response}
 
 @app.get("/get_local")
 def retrieve(query: str):
-    results = active_local_search.search(query)
+    results = local_search.search(query)
     return {"response": results.context_text}
 
 @app.post("/post_results")
 def retrieve(payload: QueryModel):
     user_query = payload.query
-    results = active_local_search.search(user_query)
+    results = local_search_modified.search(user_query)
     return {"response": results}

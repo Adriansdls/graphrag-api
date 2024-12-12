@@ -118,7 +118,7 @@ llm_params = {
     "temperature": 0.0,
 }
 
-active_local_search = LocalSearchModified(
+local_search_modified = LocalSearchModified(
     llm=llm,
     context_builder=context_builder,
     token_encoder=token_encoder,
@@ -128,19 +128,11 @@ active_local_search = LocalSearchModified(
     system_prompt="Use only the following content to answer the question"
 )
 
-# app = FastAPI()
-
-# class QueryModel(BaseModel):
-#     query: str
-
-# @app.post("/drift")
-# def retrieve(payload: QueryModel):
-#     user_query = payload.query
-#     results = active_local_search.get_data(user_query)
-#     return {"response": results.response}
-
-# @app.post("/local")
-# def retrieve(payload: QueryModel):
-#     user_query = payload.query
-#     results = active_local_search.get_data(user_query)
-#     return {"response": results.response}
+local_search = LocalSearch(
+    llm=llm,
+    context_builder=context_builder,
+    token_encoder=token_encoder,
+    llm_params=llm_params,
+    context_builder_params=local_context_params,
+    response_type="informative and structured response",
+)
